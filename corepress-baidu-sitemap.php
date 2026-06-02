@@ -11,7 +11,7 @@
  * Text Domain: baidu-seo-enhanced
  * Domain Path: /languages
  * Requires at least: 5.0
- * Requires PHP: 8.0
+ * Requires PHP: 7.4
  * Network: false
  */
 
