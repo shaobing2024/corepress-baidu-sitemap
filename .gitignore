@@ -1,0 +1,19 @@
+# 系统文件
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 临时文件
+*.log
+*.tmp
+
+# 开发文档（不上传本地工作记录）
+CODE_REVIEW_REPORT.md
+UPGRADE_REPORT.md
+plugin-summary.md
