@@ -5,7 +5,7 @@
  * Description: 自动生成百度兼容的站点地图文件，帮助百度搜索引擎更好地抓取和收录您的网站内容。包含SEO优化、结构化数据、自动推送等增强功能。
  * Version: 1.0.3
  * Author: 不良人
- * Author URI: https://github.com/shaobing2024 
+ * Author URI: https://www.xiaomaw.cn 
  * License: GPL v2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain: baidu-seo-enhanced
