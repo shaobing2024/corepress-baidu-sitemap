@@ -1,6 +1,6 @@
 # 百度收录增强版 (Baidu SEO Enhanced)
 
-[![Version](https://img.shields.io/badge/version-1.0.2-blue.svg)](https://github.com/buliangren/corepress-baidu-sitemap)
+[![Version](https://img.shields.io/badge/version-1.0.3-blue.svg)](https://github.com/shaobing2024/corepress-baidu-sitemap)
 [![WordPress](https://img.shields.io/badge/WordPress-5.0%2B-green.svg)](https://wordpress.org/)
 [![PHP](https://img.shields.io/badge/PHP-7.4%2B-purple.svg)](https://php.net/)
 [![License](https://img.shields.io/badge/license-GPL%20v2-orange.svg)](LICENSE)
@@ -45,7 +45,7 @@ WordPress 百度搜索引擎优化插件。自动生成百度兼容的 XML/TXT �
 
 ```bash
 cd wp-content/plugins/
-git clone https://github.com/buliangren/corepress-baidu-sitemap.git
+git clone https://github.com/shaobing2024/corepress-baidu-sitemap.git
 ```
 
 然后进入 WordPress 后台 → 插件 → 启用「百度收录增强版」。
@@ -140,6 +140,12 @@ https://www.example.com/url2
 ---
 
 ## 更新日志
+
+### v1.0.3
+- 修复 PHP 8.1+ 兼容性（`FILTER_SANITIZE_STRING` 废弃警告）
+- 修正插件头 `Requires PHP: 7.4`（兼容 PHP 7.4–8.x）
+- 修正作者 URI 为 GitHub 主页
+- 更新 README 仓库地址为 shaobing2024
 
 ### v1.0.2
 - 修复 360 解析器因 trailing slash 重定向导致 0 条 URL
