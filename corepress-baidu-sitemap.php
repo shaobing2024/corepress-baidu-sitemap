@@ -21,7 +21,7 @@ if (!defined('ABSPATH')) {
 }
 
 // 插件常量
-define('CP_BAIDU_SITEMAP_VERSION', '1.0.2');
+define('CP_BAIDU_SITEMAP_VERSION', '1.0.3');
 define('CP_BAIDU_SITEMAP_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('CP_BAIDU_SITEMAP_PLUGIN_PATH', plugin_dir_path(__FILE__));
 
@@ -85,7 +85,7 @@ function cp_baidu_sitemap_get_urls($limit = 0) {
     $urls[] = array(
         'loc'        => home_url('/'),
         'lastmod'    => current_time('c'),
-        'changefreq' => 'daily',
+        'changefreq' => $settings['changefreq'],
         'priority'   => '1.0',
     );
 
@@ -174,7 +174,7 @@ function cp_baidu_sitemap_get_urls($limit = 0) {
 
     // 分类
     if ($settings['include_categories']) {
-        $categories = get_categories(array('hide_empty' => false));
+        $categories = get_categories(array('hide_empty' => true));
 
         foreach ($categories as $category) {
             $urls[] = array(
@@ -188,7 +188,7 @@ function cp_baidu_sitemap_get_urls($limit = 0) {
 
     // 标签
     if ($settings['include_tags']) {
-        $tags = get_tags(array('hide_empty' => false));
+        $tags = get_tags(array('hide_empty' => true));
 
         foreach ($tags as $tag) {
             $urls[] = array(
