@@ -2,8 +2,8 @@
 /**
  * Plugin Name: 百度收录增强版
  * Plugin URI: https://www.93web.com/baidu-seo-enhanced
- * Description: 自动生成百度兼容的站点地图文件，帮助百度搜索引擎更好地抓取和收录您的网站内容。包含SEO优化、结构化数据、自动推送等增强功能。
- * Version: 1.0.3
+ * Description: 自动生成百度兼容的站点地图文件，帮助百度搜索引擎更好地抓取和收录您的网站内容。包含 SEO 优化、结构化数据、自动推送等增强功能。支持多搜索引擎、收录追踪、死链检测等。
+ * Version: 2.0.0
  * Author: 不良人
  * Author URI: https://www.xiaomaw.cn 
  * License: GPL v2 or later
@@ -20,8 +20,28 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+// 加载核心类文件
+require_once CP_BAIDU_SITEMAP_PLUGIN_PATH . 'includes/class-search-engines.php';
+require_once CP_BAIDU_SITEMAP_PLUGIN_PATH . 'includes/class-index-tracker.php';
+require_once CP_BAIDU_SITEMAP_PLUGIN_PATH . 'includes/class-logger.php';
+require_once CP_BAIDU_SITEMAP_PLUGIN_PATH . 'includes/class-url-filter.php';
+require_once CP_BAIDU_SITEMAP_PLUGIN_PATH . 'includes/class-media-sitemap.php';
+require_once CP_BAIDU_SITEMAP_PLUGIN_PATH . 'includes/class-seo-analyzer.php';
+require_once CP_BAIDU_SITEMAP_PLUGIN_PATH . 'includes/class-broken-link-detector.php';
+require_once CP_BAIDU_SITEMAP_PLUGIN_PATH . 'includes/class-scheduler.php';
+
+// 初始化全局对象
+$GLOBALS['cp_engine_handler'] = new CP_Search_Engines();
+$GLOBALS['cp_index_tracker'] = new CP_Index_Tracker();
+$GLOBALS['cp_logger'] = new CP_Logger();
+$GLOBALS['cp_url_filter'] = new CP_URL_Filter();
+$GLOBALS['cp_media_sitemap'] = new CP_Media_Sitemap();
+$GLOBALS['cp_seo_analyzer'] = new CP_SEO_Analyzer();
+$GLOBALS['cp_broken_link_detector'] = new CP_Broken_Link_Detector();
+$GLOBALS['cp_scheduler'] = new CP_Scheduler();
+
 // 插件常量
-define('CP_BAIDU_SITEMAP_VERSION', '1.0.3');
+define('CP_BAIDU_SITEMAP_VERSION', '2.0.0');
 define('CP_BAIDU_SITEMAP_PLUGIN_URL', plugin_dir_url(__FILE__));
 define('CP_BAIDU_SITEMAP_PLUGIN_PATH', plugin_dir_path(__FILE__));
 
@@ -41,6 +61,17 @@ function cp_baidu_sitemap_default_settings() {
         'changefreq'        => 'daily',
         'post_priority'     => '0.8',
         'page_priority'     => '0.6',
+        // 新增功能设置
+        'engines'           => array('baidu' => 1),
+        'include_images'    => false,
+        'include_videos'    => false,
+        'include_content_images' => false,
+        'debug_mode'        => false,
+        'exclude_posts'     => array(),
+        'exclude_pages'     => array(),
+        'exclude_categories'=> array(),
+        'exclude_tags'      => array(),
+        'exclude_pattern'   => '',
     );
 }
 
@@ -117,10 +148,16 @@ function cp_baidu_sitemap_get_urls($limit = 0) {
             }
         }
 
-        foreach ($posts as $post) {
-            // 统一转为 ISO 8601 格式（W3C 标准要求），避免360等严格解析器拒绝
-            $raw_date = isset($modified_dates[$post->ID]) ? $modified_dates[$post->ID] : get_post_modified_time('Y-m-d H:i:s', false, $post->ID);
-            $lastmod_iso = date('c', strtotime($raw_date));
+    foreach ($posts as $post) {
+        // 使用 URL 过滤器
+        $url = get_permalink($post->ID);
+        if ($GLOBALS['cp_url_filter']->should_exclude($post->ID, $url)) {
+            continue;
+        }
+        
+        // 统一转为 ISO 8601 格式（W3C 标准要求），避免 360 等严格解析器拒绝
+        $raw_date = isset($modified_dates[$post->ID]) ? $modified_dates[$post->ID] : get_post_modified_time('Y-m-d H:i:s', false, $post->ID);
+        $lastmod_iso = date('c', strtotime($raw_date));
 
             $urls[] = array(
                 'loc'        => get_permalink($post->ID),
@@ -159,9 +196,15 @@ function cp_baidu_sitemap_get_urls($limit = 0) {
             }
         }
 
-        foreach ($pages as $page) {
-            $raw_date = isset($modified_dates[$page->ID]) ? $modified_dates[$page->ID] : get_post_modified_time('Y-m-d H:i:s', false, $page->ID);
-            $lastmod_iso = date('c', strtotime($raw_date));
+    foreach ($pages as $page) {
+        // 使用 URL 过滤器
+        $url = get_permalink($page->ID);
+        if ($GLOBALS['cp_url_filter']->should_exclude($page->ID, $url)) {
+            continue;
+        }
+        
+        $raw_date = isset($modified_dates[$page->ID]) ? $modified_dates[$page->ID] : get_post_modified_time('Y-m-d H:i:s', false, $page->ID);
+        $lastmod_iso = date('c', strtotime($raw_date));
 
             $urls[] = array(
                 'loc'        => get_permalink($page->ID),
@@ -250,9 +293,63 @@ function cp_baidu_sitemap_generate_files() {
 
     if (!is_dir($sitemap_dir)) {
         if (!wp_mkdir_p($sitemap_dir)) {
-            error_log('CorePress百度地图: 无法创建目录 - ' . $sitemap_dir);
+            error_log('CorePress 百度地图：无法创建目录 - ' . $sitemap_dir);
             return false;
         }
+    }
+
+    if (!is_writable($sitemap_dir)) {
+        error_log('CorePress 百度地图：目录不可写 - ' . $sitemap_dir);
+        return false;
+    }
+
+    $settings = cp_baidu_sitemap_get_settings();
+    $urls = cp_baidu_sitemap_get_urls();
+
+    $xml_file = $sitemap_dir . '/baidu_sitemap.xml';
+    $txt_file = $sitemap_dir . '/baidu_sitemap.txt';
+
+    // 生成 XML
+    $xml_content = '<?xml version="1.0" encoding="UTF-8"?>' . "\n";
+    $xml_content .= '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">' . "\n";
+
+    foreach ($urls as $url) {
+        $xml_content .= '  <url>' . "\n";
+        $xml_content .= '    <loc>' . esc_url($url['loc']) . '</loc>' . "\n";
+        $xml_content .= '    <lastmod>' . esc_html($url['lastmod']) . '</lastmod>' . "\n";
+        $xml_content .= '    <changefreq>' . esc_html($url['changefreq']) . '</changefreq>' . "\n";
+        $xml_content .= '    <priority>' . esc_html($url['priority']) . '</priority>' . "\n";
+        $xml_content .= '  </url>' . "\n";
+    }
+
+    $xml_content .= '</urlset>';
+
+    // 生成 TXT
+    $txt_content = '';
+    foreach ($urls as $url) {
+        $txt_content .= esc_url($url['loc']) . "\n";
+    }
+
+    // 保存文件（添加错误处理）
+    $xml_result = file_put_contents($xml_file, $xml_content);
+    $txt_result = file_put_contents($txt_file, $txt_content);
+
+    if ($xml_result === false || $txt_result === false) {
+        error_log('CorePress 百度地图：文件写入失败');
+        return false;
+    }
+
+    // 记录日志
+    $GLOBALS['cp_logger']->log_sitemap_generation(array(
+        'xml_file' => $xml_file,
+        'txt_file' => $txt_file,
+    ));
+
+    return array(
+        'xml' => $xml_file,
+        'txt' => $txt_file,
+    );
+}
     }
 
     if (!is_writable($sitemap_dir)) {
@@ -332,6 +429,9 @@ add_filter('robots_txt', 'cp_baidu_sitemap_add_to_robots');
 function cp_baidu_sitemap_rewrite_rules() {
     add_rewrite_rule('baidu-sitemap\.xml$', 'index.php?cp_bsitemap=1', 'top');
     add_rewrite_rule('baidu-sitemap\.txt$', 'index.php?cp_bsitemap_txt=1', 'top');
+    add_rewrite_rule('baidu-image-sitemap\.xml$', 'index.php?cp_bsitemap_img=1', 'top');
+    add_rewrite_rule('baidu-video-sitemap\.xml$', 'index.php?cp_bsitemap_vid=1', 'top');
+    add_rewrite_rule('deadlinks\.txt$', 'index.php?cp_deadlinks=1', 'top');
 }
 add_action('init', 'cp_baidu_sitemap_rewrite_rules');
 
@@ -353,6 +453,9 @@ add_filter('redirect_canonical', 'cp_baidu_sitemap_no_trailing_slash', 10, 2);
 function cp_baidu_sitemap_query_vars($vars) {
     $vars[] = 'cp_bsitemap';
     $vars[] = 'cp_bsitemap_txt';
+    $vars[] = 'cp_bsitemap_img';
+    $vars[] = 'cp_bsitemap_vid';
+    $vars[] = 'cp_deadlinks';
     return $vars;
 }
 add_filter('query_vars', 'cp_baidu_sitemap_query_vars');
@@ -361,7 +464,7 @@ add_filter('query_vars', 'cp_baidu_sitemap_query_vars');
  * 处理站点地图请求
  */
 function cp_baidu_sitemap_handle_request() {
-    // XML格式
+    // XML 格式
     if (get_query_var('cp_bsitemap')) {
         $upload_dir = wp_upload_dir();
         $xml_file = $upload_dir['basedir'] . '/corepress_sitemaps/baidu_sitemap.xml';
@@ -373,10 +476,46 @@ function cp_baidu_sitemap_handle_request() {
         }
     }
 
-    // TXT格式
+    // TXT 格式
     if (get_query_var('cp_bsitemap_txt')) {
         $upload_dir = wp_upload_dir();
         $txt_file = $upload_dir['basedir'] . '/corepress_sitemaps/baidu_sitemap.txt';
+
+        if (file_exists($txt_file)) {
+            header('Content-Type: text/plain; charset=UTF-8');
+            readfile($txt_file);
+            exit;
+        }
+    }
+    
+    // 图片 Sitemap
+    if (get_query_var('cp_bsitemap_img')) {
+        $upload_dir = wp_upload_dir();
+        $xml_file = $upload_dir['basedir'] . '/corepress_sitemaps/baidu_image_sitemap.xml';
+
+        if (file_exists($xml_file)) {
+            header('Content-Type: application/xml; charset=UTF-8');
+            readfile($xml_file);
+            exit;
+        }
+    }
+    
+    // 视频 Sitemap
+    if (get_query_var('cp_bsitemap_vid')) {
+        $upload_dir = wp_upload_dir();
+        $xml_file = $upload_dir['basedir'] . '/corepress_sitemaps/baidu_video_sitemap.xml';
+
+        if (file_exists($xml_file)) {
+            header('Content-Type: application/xml; charset=UTF-8');
+            readfile($xml_file);
+            exit;
+        }
+    }
+    
+    // 死链文件
+    if (get_query_var('cp_deadlinks')) {
+        $upload_dir = wp_upload_dir();
+        $txt_file = $upload_dir['basedir'] . '/corepress_sitemaps/deadlinks.txt';
 
         if (file_exists($txt_file)) {
             header('Content-Type: text/plain; charset=UTF-8');
@@ -411,8 +550,14 @@ function cp_baidu_sitemap_on_post_save($post_id) {
     // 生成站点地图
     cp_baidu_sitemap_generate_files();
 
-    // 主动推送URL到百度
+    // 主动推送 URL 到百度
     cp_baidu_push_single_url($post_id);
+    
+    // 记录到收录追踪器
+    $url = get_permalink($post_id);
+    if ($url) {
+        $GLOBALS['cp_index_tracker']->record_submission($post_id, $url, 'baidu');
+    }
 }
 add_action('save_post', 'cp_baidu_sitemap_on_post_save');
 
@@ -432,10 +577,46 @@ add_action('delete_post', 'cp_baidu_sitemap_on_post_delete');
 function cp_baidu_push_single_url($post_id) {
     $settings = cp_baidu_sitemap_get_settings();
 
-    // 未启用自动推送或未配置token则跳过
+    // 未启用自动推送或未配置 token 则跳过
     if (!$settings['enabled'] || !$settings['auto_submit'] || empty($settings['baidu_token'])) {
         return;
     }
+
+    $url = get_permalink($post_id);
+    if (!$url) {
+        return;
+    }
+
+    $site = parse_url(home_url(), PHP_URL_HOST);
+    $api_url = 'http://data.zz.baidu.com/urls?site=' . urlencode($site) . '&token=' . urlencode($settings['baidu_token']);
+
+    $response = wp_remote_post($api_url, array(
+        'headers' => array(
+            'Content-Type' => 'text/plain',
+        ),
+        'body' => $url,
+        'timeout' => 10,
+        'user-agent' => 'CorePress-Baidu-Sitemap/' . CP_BAIDU_SITEMAP_VERSION,
+    ));
+
+    if (is_wp_error($response)) {
+        error_log('【百度推送失败】URL: ' . $url . ' | 错误：' . $response->get_error_message());
+        $GLOBALS['cp_logger']->log_api_error('百度', $response->get_error_message());
+        return false;
+    }
+
+    $body = wp_remote_retrieve_body($response);
+    $result = json_decode($body, true);
+    
+    // 记录到收录追踪器
+    if (isset($result['success'])) {
+        $GLOBALS['cp_index_tracker']->record_submission($post_id, $url, 'baidu');
+    }
+    
+    error_log('【百度推送结果】URL: ' . $url . ' | 响应：' . $body);
+    $GLOBALS['cp_logger']->log_push('百度', 1, $result);
+    return $body;
+}
 
     $url = get_permalink($post_id);
     if (!$url) {
@@ -682,7 +863,7 @@ function cp_baidu_sitemap_admin_menu() {
         '百度收录增强',
         'manage_options',
         'corepress-baidu-sitemap',
-        'cp_baidu_sitemap_admin_page'
+        'cp_baidu_sitemap_advanced_page'
     );
 }
 add_action('admin_menu', 'cp_baidu_sitemap_admin_menu');
@@ -691,33 +872,36 @@ add_action('admin_menu', 'cp_baidu_sitemap_admin_menu');
  * 设置页面内容
  */
 function cp_baidu_sitemap_admin_page() {
+    cp_baidu_sitemap_advanced_tabs();
+    
     $settings = cp_baidu_sitemap_get_settings();
 
     // 处理表单提交
-    if (isset($_POST['cp_baidu_sitemap_submit'])) {
-        if (!isset($_POST['cp_baidu_sitemap_nonce']) || !wp_verify_nonce($_POST['cp_baidu_sitemap_nonce'], 'cp_baidu_sitemap')) {
-            echo '<div class="error"><p>安全验证失败</p></div>';
-        } else {
-            $new_settings = array(
-                'enabled'           => isset($_POST['cp_enabled']),
-                'format'            => sanitize_text_field($_POST['cp_format']),
-                'include_posts'     => isset($_POST['cp_include_posts']),
-                'include_pages'     => isset($_POST['cp_include_pages']),
-                'include_categories' => isset($_POST['cp_include_categories']),
-                'include_tags'      => isset($_POST['cp_include_tags']),
-                'baidu_token'       => sanitize_text_field($_POST['cp_baidu_token']),
-                'auto_submit'       => isset($_POST['cp_auto_submit']),
-                'changefreq'        => sanitize_text_field($_POST['cp_changefreq']),
-                'post_priority'     => sanitize_text_field($_POST['cp_post_priority']),
-                'page_priority'     => sanitize_text_field($_POST['cp_page_priority']),
-            );
+            if (isset($_POST['cp_baidu_sitemap_submit'])) {
+                if (!isset($_POST['cp_baidu_sitemap_nonce']) || !wp_verify_nonce($_POST['cp_baidu_sitemap_nonce'], 'cp_baidu_sitemap')) {
+                    echo '<div class="error"><p>安全验证失败</p></div>';
+                } else {
+                    $new_settings = array(
+                        'enabled'           => isset($_POST['cp_enabled']),
+                        'format'            => sanitize_text_field($_POST['cp_format']),
+                        'include_posts'     => isset($_POST['cp_include_posts']),
+                        'include_pages'     => isset($_POST['cp_include_pages']),
+                        'include_categories' => isset($_POST['cp_include_categories']),
+                        'include_tags'      => isset($_POST['cp_include_tags']),
+                        'baidu_token'       => sanitize_text_field($_POST['cp_baidu_token']),
+                        'auto_submit'       => isset($_POST['cp_auto_submit']),
+                        'changefreq'        => sanitize_text_field($_POST['cp_changefreq']),
+                        'post_priority'     => sanitize_text_field($_POST['cp_post_priority']),
+                        'page_priority'     => sanitize_text_field($_POST['cp_page_priority']),
+                        'debug_mode'        => isset($_POST['cp_debug_mode']),
+                    );
 
-            cp_baidu_sitemap_save_settings($new_settings);
-            $settings = $new_settings;
+                    cp_baidu_sitemap_save_settings($new_settings);
+                    $settings = $new_settings;
 
-            echo '<div class="updated"><p>设置已保存</p></div>';
-        }
-    }
+                    echo '<div class="updated"><p>设置已保存</p></div>';
+                }
+            }
 
     // 处理生成请求
     if (isset($_POST['cp_generate_now'])) {
@@ -817,15 +1001,15 @@ function cp_baidu_sitemap_admin_page() {
                     <th scope="row">页面优先级</th>
                     <td>
                         <input type="number" name="cp_page_priority" value="<?php echo esc_attr($settings['page_priority']); ?>" min="0" max="1" step="0.1">
-                        <p class="description">范围: 0.0 - 1.0</p>
+                        <p class="description">范围：0.0 - 1.0</p>
                     </td>
                 </tr>
 
                 <tr>
-                    <th scope="row">百度推送Token</th>
+                    <th scope="row">百度推送 Token</th>
                     <td>
                         <input type="text" name="cp_baidu_token" value="<?php echo esc_attr($settings['baidu_token']); ?>" class="regular-text">
-                        <p class="description">从百度站长平台获取的推送Token</p>
+                        <p class="description">从百度站长平台获取的推送 Token</p>
                     </td>
                 </tr>
 
@@ -835,6 +1019,16 @@ function cp_baidu_sitemap_admin_page() {
                         <label>
                             <input type="checkbox" name="cp_auto_submit" value="1" <?php checked($settings['auto_submit']); ?>>
                             文章发布时自动推送到百度
+                        </label>
+                    </td>
+                </tr>
+                
+                <tr>
+                    <th scope="row">调试模式</th>
+                    <td>
+                        <label>
+                            <input type="checkbox" name="cp_debug_mode" value="1" <?php checked($settings['debug_mode']); ?>>
+                            启用调试日志（记录详细的 API 请求和错误）
                         </label>
                     </td>
                 </tr>
@@ -1100,12 +1294,19 @@ function cp_baidu_sitemap_admin_page() {
  * 插件激活时
  */
 function cp_baidu_sitemap_activate() {
-    // 添加rewrite规则
+    // 添加 rewrite 规则
     cp_baidu_sitemap_rewrite_rules();
     flush_rewrite_rules();
 
     // 生成初始站点地图
     cp_baidu_sitemap_generate_files();
+    
+    // 创建数据库表
+    $GLOBALS['cp_index_tracker']->create_table();
+    $GLOBALS['cp_broken_link_detector']->create_table();
+    
+    // 注册定时任务
+    $GLOBALS['cp_scheduler']->register_schedules();
 }
 register_activation_hook(__FILE__, 'cp_baidu_sitemap_activate');
 
@@ -1160,13 +1361,50 @@ function cp_baidu_ajax_check_quota() {
 add_action('wp_ajax_cp_baidu_check_quota', 'cp_baidu_ajax_check_quota');
 
 /**
+ * AJAX 检测文章中的死链
+ */
+function cp_baidu_ajax_detect_broken_links() {
+    if (!current_user_can('manage_options')) {
+        wp_send_json_error(array('message' => '权限不足'));
+    }
+    check_ajax_referer('cp_broken_links');
+    
+    $detector = $GLOBALS['cp_broken_link_detector'];
+    
+    // 获取所有文章
+    $posts = get_posts(array(
+        'post_type'      => 'post',
+        'post_status'    => 'publish',
+        'posts_per_page' => 10,
+        'orderby'        => 'modified',
+        'order'          => 'DESC',
+    ));
+    
+    $total_detected = 0;
+    
+    foreach ($posts as $post) {
+        $broken_links = $detector->check_post_links($post->ID);
+        $total_detected += count($broken_links);
+    }
+    
+    wp_send_json_success(array(
+        'count' => $total_detected,
+        'message' => '检测完成，发现 ' . $total_detected . ' 个死链',
+    ));
+}
+add_action('wp_ajax_cp_detect_broken_links', 'cp_baidu_ajax_detect_broken_links');
+
+/**
  * 插件停用时
  */
 function cp_baidu_sitemap_deactivate() {
     // 清除缓存
     cp_baidu_sitemap_clear_cache();
 
-    // 清除rewrite规则
+    // 清除 rewrite 规则
     flush_rewrite_rules();
+    
+    // 清除定时任务
+    $GLOBALS['cp_scheduler']->clear_schedules();
 }
 register_deactivation_hook(__FILE__, 'cp_baidu_sitemap_deactivate');
